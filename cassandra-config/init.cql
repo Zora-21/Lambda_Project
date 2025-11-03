@@ -1,15 +1,8 @@
-/*/Users/matteo/Documents/Lambda_IoT/cassandra-config/init.cql*/
-/* Crea il Keyspace 'moviedb' se non esiste.
- * Usiamo 'SimpleStrategy' con replication_factor: 2 
- * perché nel docker-compose hai due nodi (seed e node1).
- */
-CREATE KEYSPACE IF NOT EXISTS moviedb
+CREATE KEYSPACE IF NOT EXISTS iot_keyspace
 WITH replication = { 'class': 'SimpleStrategy', 'replication_factor': 2 };
 
-/* Usa il keyspace appena creato */
-USE moviedb;
+USE iot_keyspace;
 
-/* Crea la tabella 'sensor_data' come da specifiche del PDF [cite: 63-68] */
 CREATE TABLE IF NOT EXISTS sensor_data (
   sensor_id TEXT,
   timestamp TIMESTAMP,

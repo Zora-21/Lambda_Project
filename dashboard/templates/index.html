@@ -3,88 +3,334 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard IoT Lambda</title>
+    <title>Dashboard Architettura Lambda</title>
+    
     <style>
-        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f4; }
-        h1 { color: #333; }
-        .container { display: flex; gap: 20px; }
-        .card { background: #fff; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); padding: 20px; width: 300px; }
-        .card h2 { margin-top: 0; }
-        .sensor { margin-bottom: 15px; }
-        .sensor h3 { margin-bottom: 5px; color: #555; }
-        .sensor p { margin: 0; font-size: 1.2em; }
-        #loading { display: none; color: #888; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f4f7f6;
+            margin: 0;
+            padding: 20px;
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+        .container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            max-width: 1200px;
+            margin: 20px auto;
+        }
+        .card {
+            background-color: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+            padding: 20px;
+        }
+        .card h2 {
+            border-bottom: 2px solid #eee;
+            padding-bottom: 10px;
+            margin-top: 0;
+        }
+        /* Stili per lo stato ONLINE/OFFLINE */
+        #sensor-status p {
+            margin: 5px 0;
+            font-size: 0.9em;
+        }
+        .status-online { color: #28a745; font-weight: bold; }
+        .status-offline { color: #dc3545; font-weight: bold; }
+        .status-error { color: #ffc107; font-weight: bold; }
+        
+        /* Stili per il pulsante */
+        #run-job-btn {
+            width: 100%; 
+            padding: 10px; 
+            font-size: 16px; 
+            margin-top: 15px; 
+            background-color: #007bff; 
+            color: white; 
+            border: none; 
+            border-radius: 5px; 
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+        #run-job-btn:hover {
+            background-color: #0056b3;
+        }
+        #run-job-btn:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        #job-trigger-status {
+            text-align: center; 
+            margin-top: 10px;
+            font-size: 0.9em;
+        }
     </style>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
+
     <h1>Dashboard Architettura Lambda IoT</h1>
-    
+
     <div class="container">
-        <div class="card" id="realtime-card">
-            <h2>🌡️ Dati Real-Time (Speed Layer)</h2>
-            <div id="realtime-data">
-                <div class="sensor" id="sensor-A1">
-                    <h3>Sensore A1</h3>
-                    <p>Temp: <span id="A1-temp">...</span></p>
-                    <small>Timestamp: <span id="A1-ts">...</span></small>
-                </div>
-                <div class="sensor" id="sensor-B1">
-                    <h3>Sensore B1</h3>
-                    <p>Temp: <span id="B1-temp">...</span></p>
-                    <small>Timestamp: <span id="B1-ts">...</span></small>
-                </div>
-                <div class="sensor" id="sensor-C1">
-                    <h3>Sensore C1</h3>
-                    <p>Temp: <span id="C1-temp">...</span></p>
-                    <small>Timestamp: <span id="C1-ts">...</span></small>
-                </div>
+        <div class="card">
+            <h2>Dati Real-Time (Speed Layer)</h2>
+            <p>Media mobile degli ultimi 60 secondi (aggiornata ogni 2 sec).</p>
+            <canvas id="realtimeChart"></canvas>
+            
+            <div id="sensor-status">
+                <p><strong>Stato Sensori:</strong></p>
+                <p id="status-A1">Sensore A1: In attesa...</p>
+                <p id="status-B1">Sensore B1: In attesa...</p>
+                <p id="status-C1">Sensore C1: In attesa...</p>
             </div>
-            <p id="loading">Aggiornamento...</p>
         </div>
 
-        <div class="card" id="batch-card">
-            <h2>📊 Dati Storici (Batch Layer)</h2>
-            <p>(Placeholder: qui verrebbero mostrate le medie storiche calcolate da MapReduce)</p>
-            <pre id="batch-data"></pre>
+        <div class="card">
+            <h2>Dati Storici (Batch Layer)</h2>
+            <p>Statistiche aggregate (Media, Min, Max) calcolate dal job MapReduce.</p>
+            <canvas id="batchChart"></canvas>
+            <p id="batch-status" style="display: none; color: #888;"></p>
+
+            <button id="run-job-btn">
+                Avvia Job MapReduce
+            </button>
+            <p id="job-trigger-status"></p>
         </div>
     </div>
 
     <script>
-        // Funzione per aggiornare i dati in tempo reale
-        async function fetchRealtimeData() {
-            document.getElementById('loading').style.display = 'block';
+        let realtimeChartInstance;
+        let batchChartInstance;
+        let batchPollInterval; // Variabile per il nostro poller
+
+        // --- 1. Logica per il Grafico REAL-TIME ---
+
+        function initializeRealtimeChart() {
+            const ctx = document.getElementById('realtimeChart').getContext('2d');
+            realtimeChartInstance = new Chart(ctx, {
+                type: 'bar', // Grafico a barre
+                data: {
+                    labels: ['Sensore A1', 'Sensore B1', 'Sensore C1'],
+                    datasets: [{
+                        label: 'Temperatura Media Mobile (°C)',
+                        data: [0, 0, 0], // Dati iniziali
+                        backgroundColor: [
+                            'rgba(255, 99, 132, 0.5)',
+                            'rgba(54, 162, 235, 0.5)',
+                            'rgba(75, 192, 192, 0.5)'
+                        ],
+                        borderColor: [
+                            'rgba(255, 99, 132, 1)',
+                            'rgba(54, 162, 235, 1)',
+                            'rgba(75, 192, 192, 1)'
+                        ],
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    scales: {
+                        y: {
+                            beginAtZero: false,
+                            suggestedMin: 15, // Scala Y più realistica
+                            suggestedMax: 30
+                        }
+                    },
+                    animation: {
+                        duration: 500 // Animazione fluida
+                    }
+                }
+            });
+        }
+
+        async function updateRealtimeData() {
             try {
                 const response = await fetch('/data/realtime');
                 const data = await response.json();
 
-                for (const sensorId in data) {
-                    const sensor = data[sensorId];
-                    document.getElementById(sensorId + '-temp').textContent = sensor.temp + ' °C';
-                    document.getElementById(sensorId + '-ts').textContent = new Date(sensor.timestamp).toLocaleString();
+                const sensors = ['A1', 'B1', 'C1'];
+                const temps = [];
+
+                sensors.forEach(sensorId => {
+                    const sensorData = data[sensorId];
+                    const statusEl = document.getElementById(`status-${sensorId}`);
+                    
+                    if (sensorData && sensorData.status) {
+                        // Aggiorna i dati per il grafico
+                        temps.push(sensorData.temp !== 'N/A' ? sensorData.temp : 0);
+                        
+                        // Aggiorna il testo dello stato
+                        statusEl.innerHTML = `Sensore ${sensorId}: ${sensorData.temp}°C 
+                            (<span class="status-${sensorData.status.toLowerCase()}">${sensorData.status}</span>)`;
+                    } else {
+                        temps.push(0);
+                        statusEl.innerHTML = `Sensore ${sensorId}: Dati non disponibili.`;
+                    }
+                });
+
+                // Aggiorna i dati del grafico
+                if (realtimeChartInstance) {
+                    realtimeChartInstance.data.datasets[0].data = temps;
+                    realtimeChartInstance.update();
                 }
+
             } catch (error) {
-                console.error("Errore nel fetch dei dati realtime:", error);
+                console.error('Errore fetch /data/realtime:', error);
             }
-            document.getElementById('loading').style.display = 'none';
         }
 
-        // Funzione (per ora fittizia) per caricare i dati batch
-        async function fetchBatchData() {
+        // --- 2. Logica per il Grafico BATCH ---
+
+        async function loadBatchData() {
+            const statusEl = document.getElementById('batch-status');
             try {
                 const response = await fetch('/data/batch');
                 const data = await response.json();
-                document.getElementById('batch-data').textContent = JSON.stringify(data, null, 2);
+
+                if (data.status) {
+                    // Il job non è ancora finito o non è stato eseguito
+                    statusEl.textContent = data.status;
+                    statusEl.style.display = 'block';
+                    return false; // Restituisce false se il job non è finito
+                }
+                
+                // Dati pronti! Nascondi il messaggio di stato
+                statusEl.style.display = 'none';
+
+                // Trasforma i dati per Chart.js
+                const labels = Object.keys(data); // Es: ["A1-2025-11-03", "B1-2025-11-03", ...]
+                const avgData = [];
+                const minData = [];
+                const maxData = [];
+
+                labels.forEach(key => {
+                    avgData.push(data[key].avg);
+                    minData.push(data[key].min);
+                    maxData.push(data[key].max);
+                });
+
+                // Distruggi il vecchio grafico prima di disegnarne uno nuovo
+                if (batchChartInstance) {
+                    batchChartInstance.destroy();
+                }
+
+                // Inizializza il grafico batch
+                const ctx = document.getElementById('batchChart').getContext('2d');
+                batchChartInstance = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [
+                            {
+                                label: 'Media (°C)',
+                                data: avgData,
+                                backgroundColor: 'rgba(54, 162, 235, 0.5)',
+                                borderColor: 'rgba(54, 162, 235, 1)',
+                                borderWidth: 1
+                            },
+                            {
+                                label: 'Min (°C)',
+                                data: minData,
+                                backgroundColor: 'rgba(255, 206, 86, 0.5)',
+                                borderColor: 'rgba(255, 206, 86, 1)',
+                                borderWidth: 1
+                            },
+                            {
+                                label: 'Max (°C)',
+                                data: maxData,
+                                backgroundColor: 'rgba(255, 99, 132, 0.5)',
+                                borderColor: 'rgba(255, 99, 132, 1)',
+                                borderWidth: 1
+                            }
+                        ]
+                    },
+                    options: {
+                        scales: {
+                            y: {
+                                beginAtZero: false,
+                                suggestedMin: 15
+                            }
+                        }
+                    }
+                });
+                
+                return true; // Restituisce true se i dati sono stati caricati
+
             } catch (error) {
-                console.error("Errore nel fetch dei dati batch:", error);
+                console.error('Errore fetch /data/batch:', error);
+                statusEl.textContent = 'Errore nel caricamento dei dati batch.';
+                statusEl.style.display = 'block';
+                return false; // Restituisce false in caso di errore
             }
         }
 
-        // Avvia l'aggiornamento all'avvio e poi ogni 3 secondi
-        document.addEventListener('DOMContentLoaded', () => {
-            fetchRealtimeData();
-            fetchBatchData();
-            setInterval(fetchRealtimeData, 3000); // Aggiorna ogni 3 secondi
-        });
+        // --- 3. Logica di Avvio e Bottone ---
+        
+        window.onload = () => {
+            initializeRealtimeChart();
+            loadBatchData(); // Tenta di caricare i dati batch all'avvio
+            updateRealtimeData(); // Carica i dati real-time la prima volta
+            
+            // Aggiorna i dati real-time ogni 2 secondi
+            setInterval(updateRealtimeData, 2000); 
+
+            // Logica del pulsante
+            const runJobBtn = document.getElementById('run-job-btn');
+            const jobStatusEl = document.getElementById('job-trigger-status');
+
+            runJobBtn.onclick = async () => {
+                // Ferma qualsiasi vecchio poller in esecuzione
+                if (batchPollInterval) clearInterval(batchPollInterval);
+
+                jobStatusEl.textContent = 'Avvio del job...';
+                runJobBtn.disabled = true;
+
+                try {
+                    // 1. Avvia il job
+                    const response = await fetch('/trigger-job', { method: 'POST' });
+                    const data = await response.json();
+
+                    if (!response.ok) {
+                        throw new Error(data.error || "Errore sconosciuto");
+                    }
+
+                    jobStatusEl.textContent = 'Job avviato. In attesa dei risultati... (può richiedere 1-2 min)';
+                    // Nascondi il vecchio grafico e mostra "in attesa"
+                    if (batchChartInstance) batchChartInstance.destroy();
+                    document.getElementById('batch-status').textContent = "In attesa dei nuovi risultati del job...";
+                    document.getElementById('batch-status').style.display = 'block';
+
+
+                    // 2. Avvia il Polling
+                    batchPollInterval = setInterval(async () => {
+                        console.log("Polling per i risultati batch...");
+                        
+                        const success = await loadBatchData();
+                        
+                        if (success) {
+                            console.log("Dati batch trovati! Polling interrotto.");
+                            clearInterval(batchPollInterval); // Ferma il polling
+                            jobStatusEl.textContent = 'Job completato!';
+                            runJobBtn.disabled = false;
+                            
+                            // Nascondi il messaggio "completato" dopo pochi secondi
+                            setTimeout(() => { jobStatusEl.textContent = ''; }, 4000);
+                        }
+                        // Se è 'false', il polling continua...
+                        
+                    }, 5000); // Controlla ogni 5 secondi
+
+                } catch (error) {
+                    console.error('Errore trigger-job:', error);
+                    jobStatusEl.textContent = `Errore: ${error.message}`;
+                    runJobBtn.disabled = false;
+                }
+            };
+        };
     </script>
 </body>
 </html>

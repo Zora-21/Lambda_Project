@@ -1,13 +1,13 @@
 # Partiamo dall'immagine originale del nodemanager
 FROM bde2020/hadoop-nodemanager:2.0.0-hadoop3.2.1-java8
 
-# Passiamo a root per modificare i file e installare
+# Passiamo a root per installare pacchetti
 USER root
 
-# CORREZIONE: Poiché l'immagine è basata su Debian "Stretch" (che è EOL),
-# dobbiamo puntare ai repository di archivio prima di eseguire 'apt-get update'.
+# CORREZIONE: Puntiamo ai repository di archivio "Stretch" (EOL)
 RUN echo "deb http://archive.debian.org/debian/ stretch main" > /etc/apt/sources.list && \
     echo "deb http://archive.debian.org/debian-security/ stretch/updates main" >> /etc/apt/sources.list
 
-# Ora possiamo aggiornare e installare python3
-RUN apt-get update && apt-get install -y python3 python3-pip
+# Aggiorniamo e installiamo python3 (ignorando gli avvisi sui vecchi pacchetti)
+RUN apt-get -o Acquire::Check-Valid-Until=false update && \
+    apt-get install -y --allow-unauthenticated python3

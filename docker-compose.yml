@@ -21,6 +21,12 @@ services:
       - "9000:9000"
     networks:
       - lambda-net
+    healthcheck: # Aggiunto healthcheck per stabilità
+      test: ["CMD", "hdfs", "dfsadmin", "-report"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
 
   datanode:
     image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
@@ -38,6 +44,12 @@ services:
         condition: service_healthy
     networks:
       - lambda-net
+    healthcheck: # Aggiunto healthcheck per stabilità
+      test: ["CMD", "hdfs", "dfsadmin", "-report"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
 
   resourcemanager:
     image: bde2020/hadoop-resourcemanager:2.0.0-hadoop3.2.1-java8
@@ -46,7 +58,8 @@ services:
     ports:
       - "8088:8088"
     environment:
-      SERVICE_PRECONDITION: "namenode:9870;datanode:9864"
+      - SERVICE_PRECONDITION=namenode:9870;datanode:9864
+      - YARN_CONF_yarn_resourcemanager_hostname=resourcemanager
     depends_on:
       namenode:
         condition: service_healthy
@@ -54,16 +67,24 @@ services:
         condition: service_healthy
     networks:
       - lambda-net
+    healthcheck: # Aggiunto healthcheck per stabilità
+      test: ["CMD", "curl", "-f", "http://localhost:8088/ws/v1/cluster/info"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
 
   nodemanager:
-    build:
+    build: 
       context: ./hadoop-nodemanager-custom
     platform: linux/amd64
     container_name: nodemanager
     volumes:
       - ./hadoop-job:/app
     environment:
-      SERVICE_PRECONDITION: "resourcemanager:8088"
+      - SERVICE_PRECONDITION=resourcemanager:8088
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
+      - YARN_CONF_yarn_resourcemanager_hostname=resourcemanager
     depends_on:
       resourcemanager:
         condition: service_healthy
@@ -83,22 +104,23 @@ services:
       - "9042:9042"
     volumes:
       - cassandra_data:/var/lib/cassandra
-      - ./cassandra-config:/docker-entrypoint-initdb.d
+      # Questo file init.cql viene ignorato se usiamo lo script start.py
+      # ma lo lasciamo per completezza se dovessimo rimuovere start.py
+      - ./cassandra-config:/docker-entrypoint-initdb.d 
     environment:
       - CASSANDRA_CLUSTER_NAME=IoTCluster
       - CASSANDRA_SEEDS=cassandra-seed
-      - MAX_HEAP_SIZE=512M # Limita la RAM per evitare crash
+      - MAX_HEAP_SIZE=512M 
       - HEAP_NEWSIZE=128M
-    mem_limit: 2g # Limite di memoria per il container
+    mem_limit: 2g
     networks:
       - lambda-net
-    # CORREZIONE: Aggiungiamo un healthcheck paziente per Mac M1/M2
     healthcheck:
       test: ["CMD", "cqlsh", "-e", "describe keyspaces"]
-      interval: 15s       # Controlla ogni 15 secondi
-      timeout: 10s        # Timeout del check
-      retries: 10         # Riprova 10 volte
-      start_period: 90s   # Ignora i fallimenti per i primi 90 secondi
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
 
   cassandra-node1:
     image: cassandra:4.1
@@ -112,11 +134,10 @@ services:
       - HEAP_NEWSIZE=128M
     mem_limit: 2g
     depends_on:
-      cassandra-seed: # CORREZIONE: Attende che il seed sia 'healthy'
+      cassandra-seed:
         condition: service_healthy
     networks:
       - lambda-net
-    # CORREZIONE: Rimosso il 'command: sleep 20...'
 
   ###############################
   #  SERVIZI APPLICATIVI
@@ -127,7 +148,7 @@ services:
       context: ./iot-producer
     container_name: iot-producer
     depends_on:
-      resourcemanager: # <-- MODIFICATO QUI
+      resourcemanager: 
         condition: service_healthy
       cassandra-seed: 
         condition: service_healthy
@@ -141,7 +162,8 @@ services:
     container_name: dashboard
     ports:
       - "5000:5000"
-    # AGGIUNGI QUESTE RIGHE PER ATTIVARE IL DEBUG
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - FLASK_ENV=development
       - FLASK_DEBUG=1

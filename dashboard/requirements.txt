@@ -1,3 +1,5 @@
 Flask
 cassandra-driver
 hdfs
+requests
+docker

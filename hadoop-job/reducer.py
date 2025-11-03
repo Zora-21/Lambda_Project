@@ -1,12 +1,7 @@
 #!/usr/bin/env python3
 """
-reducer.py - Script Reduce per il job Hadoop Streaming.
-
-Riceve le coppie chiave-valore ordinate dal mapper.
-Le chiavi sono <sensor_id>-<data>, i valori sono le temperature.
-
-Calcola la somma e il conteggio per ogni chiave,
-poi emette la media finale.
+reducer.py - Calcola media, minimo e massimo.
+Emette: CHIAVE \t MEDIA|MIN|MAX
 """
 
 import sys
@@ -14,40 +9,41 @@ import sys
 current_key = None
 current_sum = 0
 current_count = 0
+# --- AGGIUNTO ---
+current_min = float('inf') # Inizia con un valore infinito positivo
+current_max = float('-inf') # Inizia con un valore infinito negativo
 
 for line in sys.stdin:
     try:
-        # Rimuove spazi bianchi e divide per la tabulazione
         line = line.strip()
         key, value = line.split('\t', 1)
-        
-        # Converte il valore in un numero
         temp = float(value)
 
-        # Logica di raggruppamento
-        # Se siamo ancora sulla stessa chiave, accumula i valori
         if current_key == key:
             current_sum += temp
             current_count += 1
+            # --- AGGIUNTO ---
+            current_min = min(current_min, temp)
+            current_max = max(current_max, temp)
         else:
-            # Se è una nuova chiave (e non è la prima riga),
-            # stampa il risultato della chiave precedente
             if current_key:
                 average = current_sum / current_count
-                # Emette il risultato finale: CHIAVE \t VALORE_MEDIO
-                print("{}\t{:.2f}".format(current_key, average)) # Arrotonda a 2 decimali
+                # --- MODIFICATO: Emette tutti e 3 i valori separati da | ---
+                print("{}\t{:.2f}|{:.2f}|{:.2f}".format(current_key, average, current_min, current_max))
 
             # Resetta i contatori per la nuova chiave
             current_key = key
             current_sum = temp
             current_count = 1
+            # --- AGGIUNTO ---
+            current_min = temp
+            current_max = temp
 
     except ValueError:
-        # Ignora righe con valori non numerici
         pass
 
-# Non dimenticare di stampare l'ultimo gruppo!
-# Il loop finisce, ma l'ultimo risultato è ancora in memoria.
+# Non dimenticare l'ultimo gruppo!
 if current_key:
     average = current_sum / current_count
-    print("{}\t{:.2f}".format(current_key, average))
+    # --- MODIFICATO ---
+    print("{}\t{:.2f}|{:.2f}|{:.2f}".format(current_key, average, current_min, current_max))
