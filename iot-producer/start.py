@@ -77,8 +77,7 @@ def main():
     """
     Script di avvio:
     1. Inizializza Cassandra (crea keyspace/tabella)
-    2. Inizializza HDFS (crea directory)
-    3. Lancia il producer.py
+    2. (Opzionale: potresti aggiungere qui l'init di HDFS)
     """
     
     # Diamo un po' di tempo ai servizi dipendenti per avviarsi
@@ -88,17 +87,20 @@ def main():
     initialize_cassandra()
     
     log.info("--- Inizializzazione completata ---")
-    log.info("Avvio di producer.py...")
     
-    # Ora eseguiamo lo script producer.py originale
-    # Questo prenderà il controllo del processo
-    try:
-        # Usiamo 'exec' per sostituire questo script con quello del producer
-        subprocess.run(["python", "producer.py"], check=True)
-    except subprocess.CalledProcessError as e:
-        log.error(f"producer.py ha fallito con codice {e.returncode}")
-    except FileNotFoundError:
-        log.error("Errore: 'producer.py' non trovato. Assicurati che sia nella stessa cartella.")
+    # ---- (MODIFICA QUI) ----
+    # Rimuovi o commenta le righe seguenti:
+    
+    # log.info("Avvio di producer.py...")
+    # try:
+    #     # Usiamo 'exec' per sostituire questo script con quello del producer
+    #     subprocess.run(["python", "producer.py"], check=True)
+    # except subprocess.CalledProcessError as e:
+    #     log.error(f"producer.py ha fallito con codice {e.returncode}")
+    # except FileNotFoundError:
+    #     log.error("Errore: 'producer.py' non trovato. Assicurati che sia nella stessa cartella.")
+    
+    log.info("Script di inizializzazione terminato con successo.") # <-- Puoi aggiungere questo
 
 if __name__ == "__main__":
     main()

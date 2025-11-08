@@ -1,7 +1,6 @@
 #/Users/matteo/Documents/Lambda_IoT/iot-producer/requirements.txt
 
-# Driver ufficiale per Apache Cassandra
 cassandra-driver
-
-# Client Python per HDFS
 hdfs
+requests
+websocket-client

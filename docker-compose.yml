@@ -143,15 +143,28 @@ services:
   #  SERVIZI APPLICATIVI
   ###############################
 
+  init-services: # <-- (1) SERVIZIO NUOVO
+    build:
+      context: ./iot-producer # Riutilizza la stessa immagine del producer
+    container_name: init-services
+    command: ["python", "start.py"] # Esegue SOLO lo script di init
+    depends_on:
+      cassandra-seed:
+        condition: service_healthy
+      namenode:
+        condition: service_healthy # Aggiungiamo anche HDFS
+    networks:
+      - lambda-net
+    restart: on-failure # Riprova se l'init fallisce
+
   iot-producer:
     build:
       context: ./iot-producer
     container_name: iot-producer
+    command: ["python", "producer.py"] # <-- (2) MODIFICATO: Esegue solo il producer
     depends_on:
-      resourcemanager: 
-        condition: service_healthy
-      cassandra-seed: 
-        condition: service_healthy
+      init-services: # <-- (3) MODIFICATO: Attende il completamento dell'init
+        condition: service_completed_successfully
     networks:
       - lambda-net
     restart: on-failure
@@ -164,10 +177,14 @@ services:
       - "5000:5000"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./hadoop-job:/hadoop-job
     environment:
       - FLASK_ENV=development
       - FLASK_DEBUG=1
     depends_on:
+      init-services: # <-- (4) MODIFICATO: Attende il completamento dell'init
+        condition: service_completed_successfully
+      # Manteniamo le dipendenze originali
       cassandra-seed:
         condition: service_healthy
       resourcemanager:
