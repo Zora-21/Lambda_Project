@@ -174,13 +174,20 @@ def rotate_discard_counters():
     except Exception as e:
         log.warning(f"Impossibile leggere il vecchio file di stato degli scarti. Ricomincio da zero. {e}")
 
-    # 3. Prepara il nuovo stato
+    # --- INIZIO CORREZIONE LOGICA ---
+    # 3. Calcola i valori vecchi
+    old_previous = old_stats.get("previous", 0)
+    old_current = old_stats.get("current", 0)
+    
+    # 4. Prepara il nuovo stato
     new_stats = {
-        "previous": old_stats.get("current", 0), # Il vecchio "current" diventa il "previous"
+        # Come richiesto: "previous" assume il valore del TOTALE precedente
+        "previous": old_previous + old_current, 
         "current": current_job_discards # Il contatore di memoria diventa il "current"
     }
+    # --- FINE CORREZIONE LOGICA ---
 
-    # 4. Scrivi il nuovo file di stato su HDFS
+    # 5. Scrivi il nuovo file di stato su HDFS
     try:
         with hdfs_client.write(HDFS_DISCARD_STATS_PATH, encoding='utf-8', overwrite=True) as writer:
             json.dump(new_stats, writer)
@@ -191,7 +198,7 @@ def rotate_discard_counters():
         with discard_lock:
             discard_counter_memory += current_job_discards
 
-    # 5. Rimuovi il file trigger
+    # 6. Rimuovi il file trigger
     try:
         hdfs_client.delete(HDFS_ROTATE_TRIGGER_PATH)
         log.info("File trigger rimosso.")

@@ -245,6 +245,8 @@ def get_system_performance():
 
 # --- 6. API per STATISTICHE SCARTI ---
 
+# In dashboard/app.py - QUESTA FUNZIONE E' CORRETTA
+
 @app.route('/data/discard_stats')
 def get_discard_stats():
     """
@@ -263,9 +265,12 @@ def get_discard_stats():
         with hdfs_client.read(HDFS_DISCARD_STATS_PATH, encoding='utf-8') as reader:
             stats = json.load(reader)
         
+        # Questa logica è corretta. Calcola il totale al volo.
         try:
             previous = int(stats.get("previous") or 0)
             current = int(stats.get("current") or 0)
+            stats["previous"] = previous # Assicura che siano numeri
+            stats["current"] = current   # Assicura che siano numeri
             stats["total"] = previous + current
         except (ValueError, TypeError):
             stats["total"] = 0
