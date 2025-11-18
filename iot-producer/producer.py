@@ -1,4 +1,3 @@
-#/Users/matteo/Documents/Lambda_IoT/iot-producer/producer.py
 import os
 import time
 import json
@@ -54,46 +53,6 @@ HDFS_ROTATE_TRIGGER_PATH = '/models/rotate_trigger'
 
 # Timeout per operazioni HDFS
 HDFS_TIMEOUT = 15  # secondi
-
-def hdfs_operation_with_timeout(operation_func, timeout=HDFS_TIMEOUT, retries=2):
-    """
-    Esegue un'operazione HDFS con timeout per evitare blocchi indefiniti.
-    Ritorna il risultato o None se timeout/errore.
-    Con retry logic.
-    """
-    for attempt in range(retries):
-        result = [None]
-        error = [None]
-        
-        def run_operation():
-            try:
-                result[0] = operation_func()
-            except Exception as e:
-                error[0] = e
-        
-        thread = threading.Thread(target=run_operation, daemon=True)
-        thread.start()
-        thread.join(timeout=timeout)
-        
-        if thread.is_alive():
-            if attempt < retries - 1:
-                log.debug(f"⏱️  HDFS operation timeout ({timeout}s), retry {attempt + 1}/{retries - 1}...")
-                time.sleep(1)  # Attendi prima di riprova
-            else:
-                log.warning(f"⏱️  HDFS operation timeout ({timeout}s) after {retries} retries")
-            continue
-        
-        if error[0]:
-            if attempt < retries - 1:
-                log.debug(f"HDFS operation error: {type(error[0]).__name__}, retry {attempt + 1}/{retries - 1}...")
-                time.sleep(1)
-            else:
-                log.debug(f"HDFS operation error after {retries} retries: {type(error[0]).__name__}: {error[0]}")
-            continue
-        
-        return result[0]
-    
-    return None
 
 def setup_connections():
     """Inizializza o re-inizializza le connessioni globali."""
@@ -171,21 +130,17 @@ def update_filtering_model():
         return
 
     import tempfile
-    import shutil
-
+    
     try:
         # 1. Verifica esistenza
         status = hdfs_client.status(HDFS_MODEL_PATH, strict=False)
         if not status:
             log.info("⏳ Nessun modello trovato su HDFS.")
-            # NON settiamo a None qui se abbiamo già un modello in memoria, 
-            # manteniamo quello vecchio finché non ne arriva uno nuovo o esplicito reset.
             return
 
         log.info(f"📥 Trovato modello ({HDFS_MODEL_PATH})... Download in corso...")
         
         # 2. Download atomico su file temporaneo
-        # Usiamo un file temporaneo per evitare blocchi di stream
         with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
             local_tmp_path = tmp_file.name
 
@@ -199,11 +154,11 @@ def update_filtering_model():
                 
             if not content or content.strip() == '{}':
                 log.warning("⚠️  Modello scaricato vuoto.")
-                return # Manteniamo il vecchio modello
+                return 
 
             new_model_data = json.loads(content)
             
-            # 4. Aggiorna la variabile globale in thread-safety
+            # 4. Aggiorna la variabile globale
             with model_lock:
                 filtering_model = new_model_data
                 
@@ -211,7 +166,6 @@ def update_filtering_model():
 
         except Exception as e:
             log.error(f"❌ Errore durante download/parsing modello: {e}")
-            # IMPORTANTE: Non settiamo filtering_model = None. Teniamo quello vecchio.
 
         finally:
             # Pulizia file temporaneo
@@ -220,88 +174,6 @@ def update_filtering_model():
 
     except Exception as e:
         log.error(f"❌ Errore generale update modello: {e}")
-    """
-    Controlla HDFS per il file model.json con timeout aumentato.
-    """
-    global filtering_model, hdfs_client
-    
-    if not hdfs_client:
-        log.warning("⚠️  Update Modello: HDFS client non pronto.")
-        return
-
-    try:
-        # Controlla se il file esiste
-        status = hdfs_client.status(HDFS_MODEL_PATH, strict=False)
-        if not status:
-            log.info("⏳ Nessun modello trovato. Il producer salverà dati grezzi.")
-            with model_lock:
-                filtering_model = None
-            return
-
-        log.info(f"📥 Trovato modello ({HDFS_MODEL_PATH})... Download in corso...")
-        
-        import threading
-        model_data = None
-        read_error = None
-        
-        def read_model():
-            nonlocal model_data, read_error
-            try:
-                with hdfs_client.read(HDFS_MODEL_PATH, encoding='utf-8') as reader:
-                    content = reader.read()
-                    
-                    if not content or content.strip() == '{}':
-                        log.warning("⚠️  Modello vuoto. In attesa del training...")
-                        model_data = None
-                        return
-                    
-                    model_data = json.loads(content)
-            except Exception as e:
-                read_error = e
-        
-        read_thread = threading.Thread(target=read_model, daemon=True)
-        read_thread.daemon = True
-        read_thread.start()
-        
-        # --- TIMEOUT ADATTIVO ---
-        # Se abbiamo già un modello in cache, usiamo timeout breve (5s)
-        # Altrimenti aspettiamo più a lungo (20s) per il primo caricamento
-        adaptive_timeout = 5 if filtering_model is not None else 20
-        read_thread.join(timeout=adaptive_timeout)
-        
-        if read_thread.is_alive():
-            log.warning("⏱️  TIMEOUT nella lettura del modello ({}s). Mantengo il modello precedente.".format(adaptive_timeout))
-            # Se abbiamo un modello in cache, lo manteniamo
-            # Altrimenti lo settiamo a None (che era il comportamento precedente)
-            if filtering_model is None:
-                log.error("❌ Nessun modello disponibile. I dati saranno scartati.")
-            return
-        
-        if read_error:
-            log.error(f"❌ Errore nella lettura del modello da HDFS: {type(read_error).__name__}: {read_error}")
-            with model_lock:
-                filtering_model = None
-            return
-        
-        if model_data is None:
-            with model_lock:
-                filtering_model = None
-            return
-        
-        with model_lock:
-            filtering_model = model_data
-        
-        log.info(f"✅ Modello caricato! Sensori: {list(filtering_model.keys())}")
-    
-    except json.JSONDecodeError as e:
-        log.error(f"❌ Errore JSON nel modello: {e}")
-        with model_lock:
-            filtering_model = None
-    
-    except Exception as e:
-        log.error(f"❌ Errore caricamento modello: {type(e).__name__}: {e}")
-        with model_lock:
-            filtering_model = None
 
 def rotate_discard_counters():
     """
@@ -349,7 +221,6 @@ def rotate_discard_counters():
         log.error(f"Impossibile rimuovere il file trigger! {e}")
 
 
-# --- INIZIO CORREZIONE: GESTIONE STREAM @trade ---
 def on_message(ws, message):
     """
     Callback eseguito per OGNI messaggio ricevuto dal WebSocket.
@@ -372,16 +243,15 @@ def on_message(ws, message):
         if sensor_id == "UNKNOWN":
             return 
         
-        price = float(trade_data['p']) # 'p' è il prezzo del trade
-        timestamp_ms = trade_data['E'] # 'E' è il timestamp dell'evento
+        price = float(trade_data['p']) 
+        timestamp_ms = trade_data['E'] 
         timestamp = datetime.utcfromtimestamp(timestamp_ms / 1000.0)
 
         data = {
             "sensor_id": sensor_id,
             "timestamp": timestamp,
-            "temp": price # temp ora è il prezzo del trade
+            "temp": price 
         }
-        # --- FINE CORREZIONE ---
         
         log.info(f"Dato ricevuto: {data['sensor_id']} | Prezzo: {data['temp']}")
         last_data_received_time = time.time()
@@ -481,7 +351,6 @@ def model_watcher():
             log.error(f"❌ Errore nel model watcher: {type(e).__name__}: {e}")
             time.sleep(15)  # Attendi 15s prima di riprovare
 
-# --- INIZIO CORREZIONE: SOTTOSCRIZIONE STREAM @trade ---
 def on_open(ws):
     """ 
     Callback eseguito all'apertura della connessione. 
@@ -498,7 +367,6 @@ def on_open(ws):
     }
     ws.send(json.dumps(subscribe_message))
     log.info(f"📡 Sottoscritto a: {streams}")
-# --- FINE CORREZIONE ---
 
 def main():
     global last_data_received_time, LAST_MODEL_CHECK_TIME
