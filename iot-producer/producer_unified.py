@@ -130,6 +130,33 @@ def flush_discard_stats():
     except Exception as e:
         log.error(f"Errore salvataggio stats: {e}")
 
+def cleanup_old_batches():
+    """
+    Mantiene solo gli ultimi 3 file batch nella cartella incoming.
+    """
+    if not hdfs_client: return
+    try:
+        files = hdfs_client.list(HDFS_INCOMING_DIR)
+        # Filtra solo i file batch
+        batch_files = [f for f in files if f.startswith("batch_") and f.endswith(".jsonl")]
+        
+        # Se ce ne sono più di 3, cancella i più vecchi
+        if len(batch_files) > 3:
+            # Ordina per nome (che contiene il timestamp)
+            batch_files.sort()
+            
+            # Identifica quelli da cancellare (tutti tranne gli ultimi 3)
+            files_to_delete = batch_files[:-3]
+            
+            for f in files_to_delete:
+                try:
+                    hdfs_client.delete(f"{HDFS_INCOMING_DIR}/{f}")
+                    log.info(f"🗑️ Eliminato batch vecchio: {f}")
+                except Exception as e:
+                    log.warning(f"Impossibile eliminare {f}: {e}")
+    except Exception as e:
+        log.error(f"Errore cleanup batch: {e}")
+
 def update_model():
     global filtering_model
     import tempfile
@@ -245,6 +272,10 @@ def process_queue():
                     with hdfs_client.write(full_path, encoding='utf-8', overwrite=True) as w:
                         w.write("".join(hdfs_buffer))
                     log.info(f"💾 Batch salvato in INCOMING: {filename} ({len(hdfs_buffer)} righe)")
+                    
+                    # --- CLEANUP: Mantieni solo gli ultimi 3 batch ---
+                    cleanup_old_batches()
+                    
                     hdfs_buffer = []
                     last_hdfs_flush = time.time()
                 except Exception as e:
