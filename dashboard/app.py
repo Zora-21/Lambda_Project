@@ -35,6 +35,11 @@ cluster = None
 cassandra_session = None
 docker_client = None
 
+# Cache Performance
+last_perf_stats = {}
+last_perf_time = 0
+PERF_CACHE_DURATION = 10 # secondi
+
 def init_cassandra():
     global cluster, cassandra_session
     if cassandra_session: return
@@ -151,6 +156,13 @@ def get_discard_stats():
 
 @app.route('/data/performance')
 def get_perf():
+    global last_perf_stats, last_perf_time
+    
+    # Cache Check
+    import time
+    if time.time() - last_perf_time < PERF_CACHE_DURATION and last_perf_stats:
+        return jsonify(last_perf_stats)
+
     init_docker()
     if not docker_client: return jsonify({})
     stats = {}
@@ -164,6 +176,11 @@ def get_perf():
             tx = sum(v['tx_bytes'] for v in net.values()) / 1024**2
             stats[name] = {"mem_mb": round(mem, 2), "net_rx_mb": round(rx, 2), "net_tx_mb": round(tx, 2)}
         except: stats[name] = {"mem_mb": 0, "net_rx_mb": 0, "net_tx_mb": 0}
+    
+    # Update Cache
+    last_perf_stats = stats
+    last_perf_time = time.time()
+    
     return jsonify(stats)
 
 if __name__ == '__main__':

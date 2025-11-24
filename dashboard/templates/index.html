@@ -370,22 +370,31 @@
 
             try {
                 const res = await fetch(`/data/realtime/trend?sensor_id=${sensorId}`); const data = await res.json();
-                if (realtimeLineChartInstance && data.data.length > 0) {
-                    realtimeLineChartInstance.data.datasets[0].data = data.data;
+
+                if (realtimeLineChartInstance) {
+                    // Aggiorna sempre la label e i colori
+                    realtimeLineChartInstance.data.datasets[0].label = `Price (${conf.name})`;
                     realtimeLineChartInstance.data.datasets[0].borderColor = conf.color;
                     realtimeLineChartInstance.data.datasets[0].backgroundColor = conf.color.replace('1)', '0.1)');
 
-                    // --- LOGICA PERSISTENZA ASSE X (START + 12H) ---
-                    // Prendiamo il timestamp del PRIMISSIMO dato presente nel database (indice 0)
-                    const firstDataPointTime = new Date(data.data[0].x).getTime();
+                    if (data.data.length > 0) {
+                        realtimeLineChartInstance.data.datasets[0].data = data.data;
 
-                    // Se l'asse non è stato ancora fissato, o se è cambiato drasticamente (es. cambio coin), lo impostiamo.
-                    // Una volta fissato, NON LO CAMBIAMO PIÙ durante questa sessione.
-                    // Questo garantisce che al refresh della pagina, l'asse si ricalcoli basandosi sempre sul primo dato storico.
-                    if (!trendAxisStart || Math.abs(trendAxisStart - firstDataPointTime) > 60000) {
-                        trendAxisStart = firstDataPointTime;
-                        realtimeLineChartInstance.options.scales.x.min = trendAxisStart;
-                        realtimeLineChartInstance.options.scales.x.max = trendAxisStart + (12 * 60 * 60 * 1000); // +12 Ore
+                        // --- LOGICA PERSISTENZA ASSE X (START + 12H) ---
+                        // Prendiamo il timestamp del PRIMISSIMO dato presente nel database (indice 0)
+                        const firstDataPointTime = new Date(data.data[0].x).getTime();
+
+                        // Se l'asse non è stato ancora fissato, o se è cambiato drasticamente (es. cambio coin), lo impostiamo.
+                        // Una volta fissato, NON LO CAMBIAMO PIÙ durante questa sessione.
+                        // Questo garantisce che al refresh della pagina, l'asse si ricalcoli basandosi sempre sul primo dato storico.
+                        if (!trendAxisStart || Math.abs(trendAxisStart - firstDataPointTime) > 60000) {
+                            trendAxisStart = firstDataPointTime;
+                            realtimeLineChartInstance.options.scales.x.min = trendAxisStart;
+                            realtimeLineChartInstance.options.scales.x.max = trendAxisStart + (12 * 60 * 60 * 1000); // +12 Ore
+                        }
+                    } else {
+                        // Se non ci sono dati, pulisci il grafico
+                        realtimeLineChartInstance.data.datasets[0].data = [];
                     }
 
                     realtimeLineChartInstance.update('none');
@@ -414,7 +423,35 @@
             const s = document.getElementById('sensor-select').value;
             updateRealtimeData(s); updateBatchData(s); updateDataStats(); updatePerf();
         }
-        window.onload = () => { setupChartDefaults(); initializeRealtimeLineChart(); initializePerformanceCharts(); updateAll(); setInterval(() => { const s = document.getElementById('sensor-select').value; updateRealtimeData(s); updateDataStats(); updatePerf(); }, 2000); setInterval(() => { const s = document.getElementById('sensor-select').value; updateBatchData(s); }, 60000); document.getElementById('sensor-select').onchange = updateAll; const styleSheet = document.createElement("style"); styleSheet.innerText = `@keyframes bounce { 0%, 20%, 50%, 80%, 100% {transform: translateY(0);} 40% {transform: translateY(-10px);} 60% {transform: translateY(-5px);} }`; document.head.appendChild(styleSheet); };
+        window.onload = () => {
+            setupChartDefaults();
+            initializeRealtimeLineChart();
+            initializePerformanceCharts();
+            updateAll();
+
+            // Loop Veloce (2s): Dati Real-time e Stats Aggregati
+            setInterval(() => {
+                const s = document.getElementById('sensor-select').value;
+                updateRealtimeData(s);
+                updateDataStats();
+            }, 2000);
+
+            // Loop Lento (10s): Performance (Docker Stats)
+            setInterval(() => {
+                updatePerf();
+            }, 10000);
+
+            // Loop Molto Lento (60s): Dati Batch
+            setInterval(() => {
+                const s = document.getElementById('sensor-select').value;
+                updateBatchData(s);
+            }, 60000);
+
+            document.getElementById('sensor-select').onchange = updateAll;
+            const styleSheet = document.createElement("style");
+            styleSheet.innerText = `@keyframes bounce { 0%, 20%, 50%, 80%, 100% {transform: translateY(0);} 40% {transform: translateY(-10px);} 60% {transform: translateY(-5px);} }`;
+            document.head.appendChild(styleSheet);
+        };
     </script>
 </body>
 
