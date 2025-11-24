@@ -327,6 +327,7 @@
         let realtimeLineChartInstance, memoryChartInstance, networkChartInstance;
         // Variabile per memorizzare l'inizio della "sessione" di dati (primo dato assoluto)
         let trendAxisStart = null;
+        let currentDailyAvg = null; // Variabile globale per la media giornaliera
         const SENSOR_DETAILS = { 'A1': { name: 'BTC/USDT', color: 'rgba(242, 169, 0, 1)' }, 'B1': { name: 'ETH/USDT', color: 'rgba(98, 126, 234, 1)' }, 'C1': { name: 'SOL/USDT', color: 'rgba(153, 69, 255, 1)' } };
 
         function setupChartDefaults() { Chart.defaults.color = '#e0e0e0'; Chart.defaults.borderColor = 'rgba(255, 255, 255, 0.1)'; }
@@ -337,7 +338,12 @@
             // Inizializziamo il grafico vuoto. L'asse verrà fissato al primo dato ricevuto.
             realtimeLineChartInstance = new Chart(ctx, {
                 type: 'line',
-                data: { datasets: [{ label: 'Price (USD)', data: [], borderColor: 'rgba(0, 123, 255, 1)', tension: 0.1, pointRadius: 0, fill: true, borderWidth: 2, backgroundColor: 'rgba(0, 123, 255, 0.1)' }] },
+                data: {
+                    datasets: [
+                        { label: 'Price (USD)', data: [], borderColor: 'rgba(0, 123, 255, 1)', tension: 0.1, pointRadius: 0, fill: true, borderWidth: 2, backgroundColor: 'rgba(0, 123, 255, 0.1)' },
+                        { label: 'Daily Avg', data: [], borderColor: 'rgba(255, 99, 132, 0.8)', borderDash: [5, 5], pointRadius: 0, borderWidth: 1, fill: false }
+                    ]
+                },
                 options: {
                     responsive: true, maintainAspectRatio: false,
                     scales: {
@@ -392,9 +398,25 @@
                             realtimeLineChartInstance.options.scales.x.min = trendAxisStart;
                             realtimeLineChartInstance.options.scales.x.max = trendAxisStart + (12 * 60 * 60 * 1000); // +12 Ore
                         }
+
+                        // --- AGGIORNAMENTO LINEA MEDIA GIORNALIERA ---
+                        if (currentDailyAvg !== null) {
+                            // Crea una linea orizzontale che copre tutto il range dei dati attuali
+                            // Usiamo il primo e l'ultimo timestamp dei dati per disegnare la linea
+                            const startX = data.data[0].x;
+                            const endX = data.data[data.data.length - 1].x;
+                            realtimeLineChartInstance.data.datasets[1].data = [
+                                { x: startX, y: currentDailyAvg },
+                                { x: endX, y: currentDailyAvg }
+                            ];
+                        } else {
+                            realtimeLineChartInstance.data.datasets[1].data = [];
+                        }
+
                     } else {
                         // Se non ci sono dati, pulisci il grafico
                         realtimeLineChartInstance.data.datasets[0].data = [];
+                        realtimeLineChartInstance.data.datasets[1].data = [];
                     }
 
                     realtimeLineChartInstance.update('none');
@@ -407,12 +429,22 @@
             try {
                 const res = await fetch(`/data/batch?sensor_id=${sensorId}`);
                 const data = await res.json();
-                if (data.status) { cont.innerHTML = `<p style="text-align: center; color: #888;">${data.status}</p>`; return; }
+                if (data.status) {
+                    cont.innerHTML = `<p style="text-align: center; color: #888;">${data.status}</p>`;
+                    currentDailyAvg = null; // Reset se non ci sono dati
+                    return;
+                }
                 const d = Object.keys(data)[0];
                 const m = data[d];
+
+                // Aggiorna la media globale
+                currentDailyAvg = m.mean;
+
                 const cls = m.daily_change >= 0 ? 'positive' : 'negative';
                 cont.innerHTML = `<div style="text-align: center; margin-bottom: 15px; color: #aaa; font-size: 0.9em;">Data: ${d}</div><div class="metrics-grid"><div class="metric-box"><div class="metric-label">Open</div><div class="metric-value">$${m.open.toLocaleString()}</div></div><div class="metric-box"><div class="metric-label">Close</div><div class="metric-value">$${m.close.toLocaleString()}</div></div><div class="metric-box ${cls}"><div class="metric-label">Change</div><div class="metric-value ${cls}">${m.daily_change >= 0 ? '+' : ''}${m.daily_change_pct}%</div></div><div class="metric-box"><div class="metric-label">Vol</div><div class="metric-value">${m.volatility}%</div></div><div class="metric-box"><div class="metric-label">Min</div><div class="metric-value">$${m.min.toLocaleString()}</div></div><div class="metric-box"><div class="metric-label">Max</div><div class="metric-value">$${m.max.toLocaleString()}</div></div><div class="metric-box"><div class="metric-label">Avg Price</div><div class="metric-value">$${m.mean.toLocaleString()}</div></div><div class="metric-box"><div class="metric-label">Clean Count</div><div class="metric-value">${m.count}</div></div></div>`;
-            } catch (e) { }
+            } catch (e) {
+                currentDailyAvg = null;
+            }
         }
 
         async function updateDataStats() { try { const r_agg = await fetch('/data/aggregate_stats'); const d_agg = await r_agg.json(); document.getElementById('total-clean').textContent = d_agg.total_clean.toLocaleString(); const r_disc = await fetch('/data/discard_stats'); const d_disc = await r_disc.json(); const disc_val = d_disc.total || 0; document.getElementById('total-discarded').textContent = disc_val.toLocaleString(); const total_proc = (d_agg.total_clean || 0) + disc_val; document.getElementById('total-processed').textContent = total_proc.toLocaleString(); } catch (e) { } }
@@ -447,7 +479,10 @@
                 updateBatchData(s);
             }, 60000);
 
-            document.getElementById('sensor-select').onchange = updateAll;
+            document.getElementById('sensor-select').onchange = () => {
+                currentDailyAvg = null; // Reset media al cambio sensore
+                updateAll();
+            };
             const styleSheet = document.createElement("style");
             styleSheet.innerText = `@keyframes bounce { 0%, 20%, 50%, 80%, 100% {transform: translateY(0);} 40% {transform: translateY(-10px);} 60% {transform: translateY(-5px);} }`;
             document.head.appendChild(styleSheet);
